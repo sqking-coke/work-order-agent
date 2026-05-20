@@ -1,29 +1,27 @@
 package com.workorder.agent.tool;
 
-import com.baomidou.mybatisplus.core.conditions.query.*;
-import com.workorder.agent.entity.*;
-import com.workorder.agent.mapper.*;
-import lombok.extern.slf4j.*;
-import org.springframework.beans.factory.annotation.*;
-import org.springframework.stereotype.*;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.workorder.agent.entity.WorkOrder;
+import com.workorder.agent.mapper.WorkOrderMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
-import java.time.*;
-import java.util.*;
-import java.util.stream.*;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
- * AI 统计复盘工具
- * 对周期内工单数据进行智能分析，生成复盘报告
+ * AI 统计复盘工具，对周期内工单数据进行智能分析，生成 Markdown 格式复盘报告。
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ReviewReportTool {
 
-    @Autowired
-    private WorkOrderMapper workOrderMapper;
-
-    @Autowired
-    private LLMClient llmClient;
+    private final WorkOrderMapper workOrderMapper;
+    private final LLMClient llmClient;
 
     private static final String REPORT_SYSTEM_PROMPT = """
             你是一个企业智能工单系统的数据分析师。请根据提供的工单统计数据，生成一份专业的复盘报告（Markdown格式）。
@@ -57,88 +55,29 @@ public class ReviewReportTool {
             """;
 
     /**
-     * 生成周期复盘报告
+     * 生成周期复盘报告。
      */
     public String generateReport(String reportType, String reportPeriod,
                                  LocalDateTime start, LocalDateTime end) {
-        // 查询周期内工单
         List<WorkOrder> orders = workOrderMapper.selectList(
                 new LambdaQueryWrapper<WorkOrder>()
                         .ge(WorkOrder::getCreateTime, start)
                         .le(WorkOrder::getCreateTime, end)
         );
 
-        // 统计数据
-        int total = orders.size();
-        int finishCount = (int) orders.stream().filter(o -> o.getStatus() == 2).count();
-        int aiAutoCount = (int) orders.stream().filter(o -> o.getIsAutoFinish() == 1).count();
-        int timeoutCount = 0; // 由外部传入或后续扩展
-        int duplicateCount = (int) orders.stream().filter(o -> o.getIsDuplicate() == 1).count();
+        String stats = buildStatistics(orders, reportType, reportPeriod);
 
-        double finishRate = total > 0 ? (double) finishCount / total * 100 : 0;
-        double aiRate = total > 0 ? (double) aiAutoCount / total * 100 : 0;
-
-        // 类型分布
-        Map<String, Long> typeDist = orders.stream()
-                .collect(Collectors.groupingBy(
-                        o -> o.getWorkType() != null ? o.getWorkType() : "未分类",
-                        Collectors.counting()
-                ));
-
-        // 优先级分布
-        Map<Integer, Long> priorityDist = orders.stream()
-                .collect(Collectors.groupingBy(
-                        o -> o.getPriority() != null ? o.getPriority() : 3,
-                        Collectors.counting()
-                ));
-
-        // 模块分布
-        Map<String, Long> moduleDist = orders.stream()
-                .collect(Collectors.groupingBy(
-                        o -> o.getModule() != null ? o.getModule() : "未分类",
-                        Collectors.counting()
-                ));
-
-        // 构建统计摘要
-        StringBuilder stats = new StringBuilder();
-        stats.append("报告类型：").append(reportType).append("\n");
-        stats.append("报告周期：").append(reportPeriod).append("\n");
-        stats.append("工单总数：").append(total).append("\n");
-        stats.append("办结数：").append(finishCount).append("（办结率 ").append(String.format("%.1f", finishRate)).append("%）\n");
-        stats.append("AI自动办结数：").append(aiAutoCount).append("（AI办结率 ").append(String.format("%.1f", aiRate)).append("%）\n");
-        stats.append("超时数：").append(timeoutCount).append("\n");
-        stats.append("重复工单数：").append(duplicateCount).append("\n\n");
-
-        stats.append("## 工单类型分布\n");
-        typeDist.forEach((k, v) -> stats.append("- ").append(k).append(": ").append(v).append(" 单\n"));
-
-        stats.append("\n## 优先级分布\n");
-        priorityDist.forEach((k, v) -> {
-            String label = switch (k) {
-                case 1 -> "紧急";
-                case 2 -> "高";
-                case 3 -> "中";
-                case 4 -> "低";
-                default -> "未知";
-            };
-            stats.append("- ").append(label).append(": ").append(v).append(" 单\n");
-        });
-
-        stats.append("\n## 高频业务模块 TOP 5\n");
-        moduleDist.entrySet().stream()
-                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-                .limit(5)
-                .forEach(e -> stats.append("- ").append(e.getKey()).append(": ").append(e.getValue()).append(" 单\n"));
-
-        // 调用 LLM 生成报告
         log.info("开始生成 {} 复盘报告，周期: {}", reportType, reportPeriod);
-        String report = llmClient.chat(REPORT_SYSTEM_PROMPT, stats.toString());
-
+        String report = llmClient.chat(REPORT_SYSTEM_PROMPT, stats);
+        if (report == null) {
+            log.warn("LLM 不可用，返回统计摘要作为报告");
+            return "## " + reportType + "复盘报告（" + reportPeriod + "）\n\n" + stats;
+        }
         return report;
     }
 
     /**
-     * 对单个工单进行复盘分析
+     * 对单个工单进行复盘分析。
      */
     public String reviewSingleOrder(WorkOrder order, String extraPrompt) {
         String systemPrompt = """
@@ -167,6 +106,72 @@ public class ReviewReportTool {
             userPrompt.append("额外说明：").append(extraPrompt).append("\n");
         }
 
-        return llmClient.chat(systemPrompt, userPrompt.toString());
+        String result = llmClient.chat(systemPrompt, userPrompt.toString());
+        if (result == null) {
+            return "LLM 不可用，无法生成复盘分析。工单编号：" + order.getOrderNo();
+        }
+        return result;
+    }
+
+    private String buildStatistics(List<WorkOrder> orders, String reportType, String reportPeriod) {
+        int total = orders.size();
+        int finishCount = (int) orders.stream().filter(o -> o.getStatus() == 2).count();
+        int aiAutoCount = (int) orders.stream().filter(o -> o.getIsAutoFinish() == 1).count();
+        int duplicateCount = (int) orders.stream().filter(o -> o.getIsDuplicate() == 1).count();
+
+        double finishRate = total > 0 ? (double) finishCount / total * 100 : 0;
+        double aiRate = total > 0 ? (double) aiAutoCount / total * 100 : 0;
+
+        Map<String, Long> typeDist = orders.stream()
+                .collect(Collectors.groupingBy(
+                        o -> o.getWorkType() != null ? o.getWorkType() : "未分类",
+                        Collectors.counting()
+                ));
+
+        Map<Integer, Long> priorityDist = orders.stream()
+                .collect(Collectors.groupingBy(
+                        o -> o.getPriority() != null ? o.getPriority() : 3,
+                        Collectors.counting()
+                ));
+
+        Map<String, Long> moduleDist = orders.stream()
+                .collect(Collectors.groupingBy(
+                        o -> o.getModule() != null ? o.getModule() : "未分类",
+                        Collectors.counting()
+                ));
+
+        StringBuilder stats = new StringBuilder();
+        stats.append("报告类型：").append(reportType).append("\n");
+        stats.append("报告周期：").append(reportPeriod).append("\n");
+        stats.append("工单总数：").append(total).append("\n");
+        stats.append("办结数：").append(finishCount)
+                .append("（办结率 ").append(String.format("%.1f", finishRate)).append("%）\n");
+        stats.append("AI自动办结数：").append(aiAutoCount)
+                .append("（AI办结率 ").append(String.format("%.1f", aiRate)).append("%）\n");
+        stats.append("超时数：0\n");
+        stats.append("重复工单数：").append(duplicateCount).append("\n\n");
+
+        stats.append("## 工单类型分布\n");
+        typeDist.forEach((k, v) -> stats.append("- ").append(k).append(": ").append(v).append(" 单\n"));
+
+        stats.append("\n## 优先级分布\n");
+        priorityDist.forEach((k, v) -> {
+            String label = switch (k) {
+                case 1 -> "紧急";
+                case 2 -> "高";
+                case 3 -> "中";
+                case 4 -> "低";
+                default -> "未知";
+            };
+            stats.append("- ").append(label).append(": ").append(v).append(" 单\n");
+        });
+
+        stats.append("\n## 高频业务模块 TOP 5\n");
+        moduleDist.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(5)
+                .forEach(e -> stats.append("- ").append(e.getKey()).append(": ").append(e.getValue()).append(" 单\n"));
+
+        return stats.toString();
     }
 }

@@ -234,8 +234,9 @@
 - **核心框架**：SpringBoot 3.5.x
 - **数据库**：MySQL 8.0
 - **持久层**：MyBatis-Plus
-- **文本处理**：Hutool、FastJSON2
+- **HTTP 调用**：OkHttp / Hutool Http
 - **任务调度**：Spring Schedule、自定义线程池
+- **JSON 处理**：FastJSON2
 - **AI能力**：原生HTTP调用大模型（通义/星火/DeepSeek/Qwen通用适配）
 - **轻量化RAG**：原生文本切片+语义相似度匹配，无重型框架依赖
 

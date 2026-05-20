@@ -1,16 +1,26 @@
 package com.workorder.agent.controller;
 
-import com.baomidou.mybatisplus.extension.plugins.pagination.*;
-import com.workorder.agent.dto.*;
-import com.workorder.agent.entity.*;
-import com.workorder.agent.service.*;
-import jakarta.validation.*;
-import lombok.*;
-import org.springframework.beans.*;
-import org.springframework.web.bind.annotation.*;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.workorder.agent.dto.ApiResponse;
+import com.workorder.agent.dto.KnowledgeSaveDTO;
+import com.workorder.agent.entity.WorkKnowledge;
+import com.workorder.agent.service.KnowledgeService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.time.*;
+import java.time.LocalDateTime;
 
+/**
+ * 知识库管理控制器，提供知识点的增删改查和索引刷新接口。
+ */
 @RestController
 @RequestMapping("/agent/work/knowledge")
 @RequiredArgsConstructor
@@ -19,13 +29,17 @@ public class KnowledgeController {
     private final KnowledgeService knowledgeService;
 
     /**
-     * 知识点新增/编辑
-     * POST /agent/work/knowledge/save
+     * 知识点新增/编辑。
      */
     @PostMapping("/save")
     public ApiResponse<WorkKnowledge> save(@Valid @RequestBody KnowledgeSaveDTO dto) {
         WorkKnowledge knowledge = new WorkKnowledge();
-        BeanUtils.copyProperties(dto, knowledge);
+        knowledge.setId(dto.getId());
+        knowledge.setTitle(dto.getTitle());
+        knowledge.setContent(dto.getContent());
+        knowledge.setModule(dto.getModule());
+        knowledge.setKeywords(dto.getKeywords());
+        knowledge.setStatus(dto.getStatus());
         if (dto.getId() == null) {
             knowledge.setCreateTime(LocalDateTime.now());
         }
@@ -34,8 +48,7 @@ public class KnowledgeController {
     }
 
     /**
-     * 知识点列表
-     * GET /agent/work/knowledge/list
+     * 知识点列表。
      */
     @GetMapping("/list")
     public ApiResponse<Page<WorkKnowledge>> list(
@@ -48,8 +61,7 @@ public class KnowledgeController {
     }
 
     /**
-     * 知识点详情
-     * GET /agent/work/knowledge/detail/{id}
+     * 知识点详情。
      */
     @GetMapping("/detail/{id}")
     public ApiResponse<WorkKnowledge> detail(@PathVariable Long id) {
@@ -61,8 +73,7 @@ public class KnowledgeController {
     }
 
     /**
-     * 删除知识点
-     * DELETE /agent/work/knowledge/delete/{id}
+     * 删除知识点。
      */
     @DeleteMapping("/delete/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
@@ -71,8 +82,7 @@ public class KnowledgeController {
     }
 
     /**
-     * 刷新知识库索引
-     * POST /agent/work/knowledge/refresh
+     * 刷新知识库索引。
      */
     @PostMapping("/refresh")
     public ApiResponse<Void> refresh() {

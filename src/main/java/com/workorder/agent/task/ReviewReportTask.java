@@ -1,28 +1,27 @@
 package com.workorder.agent.task;
 
-import com.workorder.agent.service.*;
-import lombok.extern.slf4j.*;
-import org.springframework.beans.factory.annotation.*;
-import org.springframework.scheduling.annotation.*;
-import org.springframework.stereotype.*;
+import com.workorder.agent.service.ReportService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
 
-import java.time.*;
-import java.time.format.*;
-import java.time.temporal.*;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.WeekFields;
 
 /**
- * 周期复盘报告定时任务
- * 每日/每周自动生成 AI 复盘报告
+ * 周期复盘报告定时任务，每日/每周自动生成 AI 复盘报告。
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ReviewReportTask {
 
-    @Autowired
-    private ReportService reportService;
+    private final ReportService reportService;
 
     /**
-     * 每日复盘：每天18:00
+     * 每日复盘：每天 18:00。
      */
     @Scheduled(cron = "${agent.task.daily-report-cron:0 0 18 * * ?}")
     public void generateDailyReport() {
@@ -37,7 +36,7 @@ public class ReviewReportTask {
     }
 
     /**
-     * 每周复盘：每周一09:00
+     * 每周复盘：每周一 09:00。
      */
     @Scheduled(cron = "${agent.task.weekly-report-cron:0 0 9 * * MON}")
     public void generateWeeklyReport() {

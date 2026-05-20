@@ -1,20 +1,21 @@
 package com.workorder.agent.tool;
 
-import com.workorder.agent.dto.*;
-import lombok.extern.slf4j.*;
-import org.springframework.beans.factory.annotation.*;
-import org.springframework.stereotype.*;
+import com.workorder.agent.dto.AiParseResult;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.util.Collections;
 
 /**
- * 工单智能解析工具
- * 调用大模型完成工单分类、优先级分级、关键信息抽取、复杂度判定
+ * 工单智能解析工具，调用大模型完成工单分类、优先级分级、关键信息抽取、复杂度判定。
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class IntelligentParserTool {
 
-    @Autowired
-    private LLMClient llmClient;
+    private final LLMClient llmClient;
 
     private static final String PARSE_SYSTEM_PROMPT = """
             你是一个企业智能工单处理系统的分析引擎。请对用户提交的工单进行智能解析，严格按JSON格式输出分析结果。
@@ -62,7 +63,7 @@ public class IntelligentParserTool {
             """;
 
     /**
-     * 智能解析工单
+     * 智能解析工单。
      */
     public AiParseResult parse(String title, String content) {
         String userMessage = String.format("请解析以下工单：\n标题：%s\n内容：%s", title, content);
@@ -77,22 +78,25 @@ public class IntelligentParserTool {
             return result;
         } catch (Exception e) {
             log.error("智能解析失败，使用默认值", e);
-            // 兜底：默认中优先级人工处理
-            AiParseResult fallback = new AiParseResult();
-            fallback.setWorkType("consult");
-            fallback.setTypeConfidence(0.5);
-            fallback.setPriority(3);
-            fallback.setPriorityReason("解析异常兜底");
-            fallback.setModule("综合");
-            fallback.setKeywords(java.util.Collections.emptyList());
-            fallback.setSummary(title);
-            fallback.setUserDemand(content);
-            fallback.setComplexity("complex");
-            fallback.setCanAutoFinish(false);
-            fallback.setAutoFinishReason("AI解析异常，需人工处理");
-            fallback.setSuggestDept("客服部");
-            fallback.setNeedUrgent(false);
-            return fallback;
+            return buildFallback(title, content);
         }
+    }
+
+    private AiParseResult buildFallback(String title, String content) {
+        AiParseResult fallback = new AiParseResult();
+        fallback.setWorkType("consult");
+        fallback.setTypeConfidence(0.5);
+        fallback.setPriority(3);
+        fallback.setPriorityReason("解析异常兜底");
+        fallback.setModule("综合");
+        fallback.setKeywords(Collections.emptyList());
+        fallback.setSummary(title);
+        fallback.setUserDemand(content);
+        fallback.setComplexity("complex");
+        fallback.setCanAutoFinish(false);
+        fallback.setAutoFinishReason("AI解析异常，需人工处理");
+        fallback.setSuggestDept("客服部");
+        fallback.setNeedUrgent(false);
+        return fallback;
     }
 }

@@ -1,44 +1,53 @@
 package com.workorder.agent.tool;
 
-import com.baomidou.mybatisplus.core.conditions.query.*;
-import com.workorder.agent.entity.*;
-import com.workorder.agent.mapper.*;
-import lombok.extern.slf4j.*;
-import org.springframework.beans.factory.annotation.*;
-import org.springframework.stereotype.*;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.workorder.agent.entity.WorkDeptConfig;
+import com.workorder.agent.mapper.WorkDeptConfigMapper;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /**
- * 工单智能分派工具
- * 根据工单类型和业务模块自动匹配责任部门与处理人
+ * 工单智能分派工具，根据工单类型和业务模块自动匹配责任部门与处理人。
  */
 @Slf4j
 @Component
 public class OrderAssignTool {
 
-    @Autowired
-    private WorkDeptConfigMapper deptConfigMapper;
+    private final WorkDeptConfigMapper deptConfigMapper;
+    private final String fallbackDeptName;
+    private final Long fallbackHandlerUserId;
+    private final String fallbackHandlerUserName;
+
+    public OrderAssignTool(WorkDeptConfigMapper deptConfigMapper,
+                           @Value("${agent.fallback-assign.dept-name:客服部}") String fallbackDeptName,
+                           @Value("${agent.fallback-assign.handler-user-id:1002}") Long fallbackHandlerUserId,
+                           @Value("${agent.fallback-assign.handler-user-name:李四}") String fallbackHandlerUserName) {
+        this.deptConfigMapper = deptConfigMapper;
+        this.fallbackDeptName = fallbackDeptName;
+        this.fallbackHandlerUserId = fallbackHandlerUserId;
+        this.fallbackHandlerUserName = fallbackHandlerUserName;
+    }
 
     /**
-     * 根据工单类型和模块匹配责任部门与处理人
+     * 根据工单类型和模块匹配责任部门与处理人。
      *
      * @param workType 工单类型
      * @param module   业务模块
-     * @return [部门名称, 处理人ID, 处理人姓名]，未匹配到返回默认
+     * @return 分派结果，未匹配到返回兜底配置
      */
     public AssignResult assign(String workType, String module) {
-        // 优先精确匹配：模块 + 类型
         WorkDeptConfig config = findBestMatch(workType, module);
 
         if (config == null) {
-            // 仅按模块匹配
             config = findBestMatch(null, module);
         }
         if (config == null) {
-            // 仅按类型匹配
             config = findBestMatch(workType, null);
         }
         if (config == null) {
-            // 获取默认部门
             config = findBestMatch(null, null);
         }
 
@@ -52,9 +61,8 @@ public class OrderAssignTool {
             );
         }
 
-        // 最终兜底
-        log.warn("未找到匹配的部门配置，使用默认值");
-        return new AssignResult("客服部", 1002L, "李四");
+        log.warn("未找到匹配的部门配置，使用兜底分派");
+        return new AssignResult(fallbackDeptName, fallbackHandlerUserId, fallbackHandlerUserName);
     }
 
     private WorkDeptConfig findBestMatch(String workType, String module) {
@@ -74,8 +82,8 @@ public class OrderAssignTool {
         return deptConfigMapper.selectOne(wrapper);
     }
 
-    @lombok.Data
-    @lombok.AllArgsConstructor
+    @Data
+    @AllArgsConstructor
     public static class AssignResult {
         private String deptName;
         private Long handlerUserId;

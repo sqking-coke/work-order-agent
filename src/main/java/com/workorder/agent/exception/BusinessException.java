@@ -1,11 +1,14 @@
 package com.workorder.agent.exception;
 
+import lombok.Getter;
+
 /**
- * 业务异常
+ * 业务异常，支持携带错误码和原始异常链。
  */
+@Getter
 public class BusinessException extends RuntimeException {
 
-    private int code;
+    private final int code;
 
     public BusinessException(int code, String message) {
         super(message);
@@ -17,7 +20,13 @@ public class BusinessException extends RuntimeException {
         this.code = 500;
     }
 
-    public int getCode() {
-        return code;
+    public BusinessException(String message, Throwable cause) {
+        super(message, cause);
+        this.code = 500;
+    }
+
+    public BusinessException(int code, String message, Throwable cause) {
+        super(message, cause);
+        this.code = code;
     }
 }

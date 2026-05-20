@@ -1,23 +1,21 @@
 package com.workorder.agent.service.impl;
 
-import cn.hutool.core.util.*;
-import com.baomidou.mybatisplus.core.conditions.query.*;
-import com.baomidou.mybatisplus.extension.plugins.pagination.*;
-import com.workorder.agent.entity.*;
-import com.workorder.agent.mapper.*;
-import com.workorder.agent.service.*;
-import com.workorder.agent.tool.*;
-import org.springframework.beans.factory.annotation.*;
-import org.springframework.stereotype.*;
+import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.workorder.agent.entity.WorkKnowledge;
+import com.workorder.agent.mapper.WorkKnowledgeMapper;
+import com.workorder.agent.service.KnowledgeService;
+import com.workorder.agent.tool.RagKnowledgeTool;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
 
 @Service
+@RequiredArgsConstructor
 public class KnowledgeServiceImpl implements KnowledgeService {
 
-    @Autowired
-    private WorkKnowledgeMapper knowledgeMapper;
-
-    @Autowired
-    private RagKnowledgeTool ragKnowledgeTool;
+    private final WorkKnowledgeMapper knowledgeMapper;
+    private final RagKnowledgeTool ragKnowledgeTool;
 
     @Override
     public WorkKnowledge save(WorkKnowledge knowledge) {
@@ -27,7 +25,6 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             knowledge.setStatus(knowledge.getStatus() != null ? knowledge.getStatus() : 1);
             knowledgeMapper.insert(knowledge);
         }
-        // 更新后刷新索引
         ragKnowledgeTool.refreshIndex();
         return knowledge;
     }

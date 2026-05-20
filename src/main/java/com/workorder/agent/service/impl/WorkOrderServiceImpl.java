@@ -1,20 +1,20 @@
 package com.workorder.agent.service.impl;
 
-import cn.hutool.core.util.*;
-import com.baomidou.mybatisplus.core.conditions.query.*;
-import com.baomidou.mybatisplus.extension.plugins.pagination.*;
-import com.workorder.agent.dto.*;
-import com.workorder.agent.entity.*;
-import com.workorder.agent.mapper.*;
-import com.workorder.agent.service.*;
-import org.springframework.beans.factory.annotation.*;
-import org.springframework.stereotype.*;
+import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.workorder.agent.dto.WorkOrderQueryDTO;
+import com.workorder.agent.entity.WorkOrder;
+import com.workorder.agent.mapper.WorkOrderMapper;
+import com.workorder.agent.service.WorkOrderService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
 
 @Service
+@RequiredArgsConstructor
 public class WorkOrderServiceImpl implements WorkOrderService {
 
-    @Autowired
-    private WorkOrderMapper workOrderMapper;
+    private final WorkOrderMapper workOrderMapper;
 
     @Override
     public Page<WorkOrder> list(WorkOrderQueryDTO queryDTO) {

@@ -1,49 +1,101 @@
 package com.workorder.agent.tool;
 
-import cn.hutool.core.util.*;
-import cn.hutool.http.*;
-import com.alibaba.fastjson2.*;
-import lombok.extern.slf4j.*;
-import org.springframework.beans.factory.annotation.*;
-import org.springframework.stereotype.*;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
+import com.workorder.agent.config.LLMConfig;
+import com.workorder.agent.exception.BusinessException;
+import lombok.extern.slf4j.Slf4j;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 /**
- * 大模型统一调用客户端
- * 兼容 OpenAI 格式接口（DeepSeek / 通义千问 / Qwen / 星火 等）
+ * LLM 客户端，通过 OpenAI 兼容 API 调用大模型。
  */
 @Slf4j
 @Component
 public class LLMClient {
 
-    @Value("${llm.api-url}")
-    private String apiUrl;
+    private static final MediaType JSON_MEDIA = MediaType.parse("application/json; charset=utf-8");
 
-    @Value("${llm.api-key}")
-    private String apiKey;
+    private final LLMConfig config;
+    private final OkHttpClient client;
 
-    @Value("${llm.model}")
-    private String model;
-
-    @Value("${llm.timeout:60000}")
-    private int timeout;
-
-    @Value("${llm.max-tokens:2048}")
-    private int maxTokens;
+    public LLMClient(LLMConfig config) {
+        this.config = config;
+        this.client = new OkHttpClient.Builder()
+                .connectTimeout(config.getConnectTimeout(), TimeUnit.SECONDS)
+                .readTimeout(config.getReadTimeout(), TimeUnit.SECONDS)
+                .build();
+    }
 
     /**
-     * 调用大模型（系统提示词 + 用户输入），返回纯文本结果
+     * 调用大模型（系统提示词 + 用户输入），返回纯文本结果。
+     * LLM 不可用时返回 null。
      */
     public String chat(String systemPrompt, String userMessage) {
         return chat(systemPrompt, userMessage, false);
     }
 
     /**
-     * 调用大模型，可指定是否强制返回 JSON
+     * 调用大模型，可指定是否强制 JSON 输出模式。
+     * LLM 不可用时返回 null。
      */
     public String chat(String systemPrompt, String userMessage, boolean jsonMode) {
+        if (!config.isEnabled()) {
+            log.debug("LLM 未启用，跳过调用");
+            return null;
+        }
+        if (config.getApiKey() == null || config.getApiKey().isBlank()) {
+            log.warn("LLM API Key 未配置，跳过调用");
+            return null;
+        }
+
+        JSONObject body = buildRequestBody(systemPrompt, userMessage, jsonMode);
+        String responseBody = executeWithRetry(body);
+        if (responseBody == null) {
+            return null;
+        }
+        return extractContent(responseBody);
+    }
+
+    /**
+     * 调用大模型并直接解析为 JSONObject。
+     * LLM 不可用时返回 null。
+     */
+    public JSONObject chatForJson(String systemPrompt, String userMessage) {
+        String raw = chat(systemPrompt, userMessage, true);
+        if (raw == null) {
+            return null;
+        }
+        return JSON.parseObject(extractJson(raw));
+    }
+
+    /**
+     * 调用大模型并直接解析为指定 Java 类型。
+     * LLM 不可用时返回 null。
+     */
+    public <T> T chatForObject(String systemPrompt, String userMessage, Class<T> clazz) {
+        String raw = chat(systemPrompt, userMessage, true);
+        if (raw == null) {
+            return null;
+        }
+        return JSON.parseObject(extractJson(raw), clazz);
+    }
+
+    // ==================== 内部实现 ====================
+
+    private JSONObject buildRequestBody(String systemPrompt, String userMessage, boolean jsonMode) {
         JSONArray messages = new JSONArray();
 
-        if (StrUtil.isNotBlank(systemPrompt)) {
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
             JSONObject sysMsg = new JSONObject();
             sysMsg.put("role", "system");
             sysMsg.put("content", systemPrompt);
@@ -56,10 +108,10 @@ public class LLMClient {
         messages.add(userMsg);
 
         JSONObject body = new JSONObject();
-        body.put("model", model);
+        body.put("model", config.getModel());
         body.put("messages", messages);
-        body.put("max_tokens", maxTokens);
-        body.put("temperature", 0.3);
+        body.put("max_tokens", config.getMaxTokens());
+        body.put("temperature", config.getTemperature());
 
         if (jsonMode) {
             JSONObject responseFormat = new JSONObject();
@@ -67,74 +119,116 @@ public class LLMClient {
             body.put("response_format", responseFormat);
         }
 
+        return body;
+    }
+
+    private String executeWithRetry(JSONObject body) {
+        int maxRetries = config.getMaxRetries();
+        int retryDelayMs = config.getRetryDelayMs();
+
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                if (attempt > 0) {
+                    log.info("LLM 重试第 {} 次", attempt);
+                }
+
+                Request request = new Request.Builder()
+                        .url(config.getApiUrl())
+                        .addHeader("Authorization", "Bearer " + config.getApiKey())
+                        .addHeader("Content-Type", "application/json")
+                        .post(RequestBody.create(body.toJSONString(), JSON_MEDIA))
+                        .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    if (response.isSuccessful()) {
+                        return response.body() != null ? response.body().string() : "";
+                    }
+
+                    String respBody = response.body() != null ? response.body().string() : "";
+                    int code = response.code();
+
+                    // 4xx 客户端错误不重试
+                    if (code >= 400 && code < 500) {
+                        log.error("LLM 客户端错误 HTTP {}: {}", code, respBody);
+                        throw new BusinessException("大模型调用失败: HTTP " + code);
+                    }
+
+                    // 5xx 服务端错误，可重试
+                    log.warn("LLM 服务端错误(第{}次) HTTP {}: {}", attempt + 1, code, respBody);
+                    if (attempt < maxRetries) {
+                        sleep(retryDelayMs);
+                        continue;
+                    }
+                    throw new BusinessException("大模型服务异常，已重试" + maxRetries + "次仍失败");
+                }
+            } catch (BusinessException e) {
+                throw e;
+            } catch (IOException e) {
+                log.warn("LLM 网络异常(第{}次): {}", attempt + 1, e.getMessage());
+                if (attempt < maxRetries) {
+                    sleep(retryDelayMs);
+                } else {
+                    throw new BusinessException("大模型调用异常: " + e.getMessage(), e);
+                }
+            }
+        }
+
+        throw new BusinessException("大模型调用失败，已达最大重试次数");
+    }
+
+    private void sleep(long ms) {
         try {
-            log.debug("LLM 请求: {}", body.toJSONString());
-            HttpResponse response = HttpRequest.post(apiUrl)
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json")
-                    .body(body.toJSONString())
-                    .timeout(timeout)
-                    .execute();
-
-            if (response.getStatus() != 200) {
-                log.error("LLM 调用失败 HTTP {}: {}", response.getStatus(), response.body());
-                throw new RuntimeException("大模型调用失败: " + response.body());
-            }
-
-            JSONObject respJson = JSON.parseObject(response.body());
-            JSONArray choices = respJson.getJSONArray("choices");
-            if (choices == null || choices.isEmpty()) {
-                throw new RuntimeException("大模型返回为空");
-            }
-
-            String content = choices.getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content");
-
-            log.debug("LLM 返回: {}", content);
-            return content;
-
-        } catch (Exception e) {
-            log.error("LLM 调用异常", e);
-            throw new RuntimeException("大模型调用异常: " + e.getMessage(), e);
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("重试等待被中断", e);
         }
     }
 
-    /**
-     * 调用大模型并直接解析为 JSONObject
-     */
-    public JSONObject chatForJson(String systemPrompt, String userMessage) {
-        String raw = chat(systemPrompt, userMessage, true);
-        // 提取 JSON（处理可能的 markdown 包裹）
-        String json = extractJson(raw);
-        return JSON.parseObject(json);
+    private String extractContent(String responseBody) {
+        JSONObject respJson = JSON.parseObject(responseBody);
+        JSONArray choices = respJson.getJSONArray("choices");
+        if (choices == null || choices.isEmpty()) {
+            throw new BusinessException("大模型返回结果为空");
+        }
+
+        JSONObject message = choices.getJSONObject(0).getJSONObject("message");
+        if (message == null) {
+            throw new BusinessException("大模型返回消息体为空");
+        }
+
+        String content = message.getString("content");
+        log.debug("LLM 返回: {}", content);
+        return content;
     }
 
     /**
-     * 调用大模型并直接解析为指定 Java 类型
+     * 从 LLM 返回中提取纯 JSON 文本，自动处理 markdown 代码块等包裹格式。
      */
-    public <T> T chatForObject(String systemPrompt, String userMessage, Class<T> clazz) {
-        String raw = chat(systemPrompt, userMessage, true);
-        String json = extractJson(raw);
-        return JSON.parseObject(json, clazz);
-    }
-
-    /**
-     * 从 LLM 返回中提取纯 JSON（去除可能的 markdown 代码块包裹）
-     */
-    private String extractJson(String raw) {
-        if (StrUtil.isBlank(raw)) {
+    static String extractJson(String raw) {
+        if (raw == null || raw.isBlank()) {
             return "{}";
         }
-        raw = raw.trim();
-        // 去除 ```json ... ``` 包裹
-        if (raw.startsWith("```")) {
-            int start = raw.indexOf("\n");
-            int end = raw.lastIndexOf("```");
+        String trimmed = raw.trim();
+
+        // 去除 ```json ... ``` 或 ``` ... ``` 包裹
+        if (trimmed.startsWith("```")) {
+            int start = trimmed.indexOf('\n');
+            int end = trimmed.lastIndexOf("```");
             if (start > 0 && end > start) {
-                raw = raw.substring(start, end).trim();
+                trimmed = trimmed.substring(start, end).trim();
             }
         }
-        return raw;
+
+        // 如果仍不是以 { 开头，尝试找到第一个 { 和最后一个 }
+        if (!trimmed.startsWith("{")) {
+            int jsonStart = trimmed.indexOf('{');
+            int jsonEnd = trimmed.lastIndexOf('}');
+            if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                trimmed = trimmed.substring(jsonStart, jsonEnd + 1);
+            }
+        }
+
+        return trimmed;
     }
 }
