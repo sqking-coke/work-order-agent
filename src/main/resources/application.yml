@@ -1,0 +1,81 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: work-order-agent
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/work_order_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.workorder.agent.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# =============================================
+# 大模型配置（兼容 OpenAI 格式接口）
+# 支持：DeepSeek / 通义千问 / Qwen / 星火 / 任意兼容接口
+# =============================================
+llm:
+  # API 地址（OpenAI 兼容格式）
+  api-url: https://api.deepseek.com/v1/chat/completions
+  # API Key
+  api-key: your-api-key-here
+  # 模型名称
+  model: deepseek-chat
+  # 请求超时（毫秒）
+  timeout: 60000
+  # 最大 Token 数
+  max-tokens: 2048
+
+# =============================================
+# 智能工单 Agent 线程池配置
+# =============================================
+agent:
+  thread-pool:
+    core-size: 4
+    max-size: 8
+    queue-capacity: 200
+    keep-alive-seconds: 60
+
+  # 定时任务配置
+  task:
+    # 超时巡检 cron（每5分钟）
+    timeout-cron: "0 */5 * * * ?"
+    # 每日复盘 cron（每天18:00）
+    daily-report-cron: "0 0 18 * * ?"
+    # 每周复盘 cron（每周一09:00）
+    weekly-report-cron: "0 0 9 * * MON"
+    # 超时阈值（小时）
+    timeout-hours: 4
+
+  # RAG 知识库配置
+  rag:
+    # 召回知识点数量
+    top-k: 5
+    # 相似度阈值（低于此值走人工）
+    similarity-threshold: 0.3
+
+# 日志配置
+logging:
+  level:
+    com.workorder.agent: DEBUG
+    com.workorder.agent.mapper: INFO
