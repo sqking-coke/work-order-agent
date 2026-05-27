@@ -9,7 +9,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/work_order_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
-    password: root
+    password: 123456
 
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
@@ -36,13 +36,13 @@ mybatis-plus:
 # =============================================
 llm:
   # 是否启用 LLM，配置 api-key 后改为 true
-  enabled: false
+  enabled: true
   # API 地址（OpenAI 兼容格式）
   api-url: https://api.deepseek.com/v1/chat/completions
   # API Key
-  api-key: your-api-key-here
+  api-key: sk-50faea90be974ca0a7b92eaf970ead14
   # 模型名称
-  model: deepseek-chat
+  model: deepseek-v4-flash
   # 连接超时（秒）
   connect-timeout: 10
   # 读取超时（秒）
